@@ -6,9 +6,20 @@ import { NOTE_NAMES, type MusicalMode } from '../types'
 import { BeatIndicator } from './BeatIndicator'
 
 export function TransportBar({ mixerOpen, onToggleMixer }: { mixerOpen: boolean; onToggleMixer: () => void }) {
-  const { song, isPlaying, tempoMismatch, setBpm, setLoopBars, setMasterVolume, setSongKey, playAll, stopAll } = useStage()
+  const { song, isPlaying, tempoMismatch, setBpm, setLoopBars, setMasterVolume, setSongKey, makeItSoundGood, playAll, stopAll } = useStage()
   const [exportLoops, setExportLoops] = useState(4)
   const [exporting, setExporting] = useState(false)
+  const [soundGoodRunning, setSoundGoodRunning] = useState(false)
+
+  const handleMakeItSoundGood = async () => {
+    if (song.placedMonsters.length === 0) return
+    setSoundGoodRunning(true)
+    try {
+      await makeItSoundGood()
+    } finally {
+      setSoundGoodRunning(false)
+    }
+  }
 
   const handleExport = async () => {
     if (song.placedMonsters.length === 0) return
@@ -40,6 +51,15 @@ export function TransportBar({ mixerOpen, onToggleMixer }: { mixerOpen: boolean;
       </button>
 
       <BeatIndicator active={isPlaying} />
+
+      <button
+        type="button"
+        onClick={handleMakeItSoundGood}
+        disabled={soundGoodRunning || song.placedMonsters.length === 0}
+        className="rounded-full bg-gradient-to-r from-fuchsia-400 to-amber-300 px-5 py-2 text-sm font-black text-[#3a2a5c] shadow-lg hover:brightness-105 disabled:opacity-40"
+      >
+        {soundGoodRunning ? '✨ Working…' : '✨ Make It Sound Good'}
+      </button>
 
       <label className="flex items-center gap-2 text-xs font-bold">
         BPM

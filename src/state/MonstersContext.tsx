@@ -1,11 +1,33 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { engine } from '../audio/engine'
-import { analyzeMonsterAudio } from '../audio/analysis'
+import { analyzeMonsterAudio, type AudioAnalysis } from '../audio/analysis'
 import { decodeBlobToBuffer, fitBufferToDuration, rotateBuffer } from '../audio/buffers'
 import { defaultPanForRole, suggestRole } from '../audio/roles'
 import { deleteBlob, deleteMonster as deleteMonsterRecord, loadAllMonsters, loadBlob, saveBlob, saveMonster } from '../storage/db'
-import { defaultProcessing, makeId, type Monster, type MonsterProcessing } from '../types'
+import { defaultProcessing, makeId, type Monster, type MonsterProcessing, type MonsterRole } from '../types'
+
+/** Folds a fresh analysis pass into a processing record, re-suggesting the
+ * role/pan unless the user already picked one manually. Shared by
+ * createMonster, the "audio changed" branch of updateMonster, and
+ * re-analyzing monsters that predate this feature. */
+function applyAnalysis(
+  base: MonsterProcessing,
+  analysis: AudioAnalysis,
+  monsterId: string,
+  keepRole?: { role: MonsterRole; pan: number },
+): MonsterProcessing {
+  const next: MonsterProcessing = {
+    ...base,
+    loudnessGainDb: analysis.loudnessGainDb,
+    detectedOnsetSec: analysis.onsetSec,
+    detectedPitch: analysis.detectedPitch,
+    analyzed: true,
+  }
+  if (keepRole) return { ...next, role: keepRole.role, roleAuto: false, pan: keepRole.pan }
+  const role = suggestRole(analysis.spectralCentroidHz, analysis.onsetDensityPerSec)
+  return { ...next, role, roleAuto: true, pan: defaultPanForRole(role, monsterId) }
+}
 
 export interface NewMonsterInput {
   name: string
@@ -28,6 +50,7 @@ interface MonstersContextValue {
   loading: boolean
   createMonster: (input: NewMonsterInput) => Promise<Monster>
   updateMonster: (id: string, patch: MonsterPatch) => Promise<void>
+  reanalyzeMonster: (id: string) => Promise<void>
   deleteMonster: (id: string) => Promise<void>
   getRawBuffer: (monster: Monster) => Promise<AudioBuffer>
   previewingId: string | null
@@ -66,7 +89,6 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
     const imageBlobKey = input.imageBlob ? await saveBlob(input.imageBlob, 'image-') : null
     const id = makeId()
     const analysis = await analyzeMonsterAudio(engine.ctx, input.audioBlob)
-    const role = suggestRole(analysis.spectralCentroidHz, analysis.onsetDensityPerSec)
     const now = Date.now()
     const monster: Monster = {
       id,
@@ -79,15 +101,7 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
       offsetSec: input.offsetSec,
       recordedBpm: engine.bpm,
       recordedLoopBars: engine.loopBars,
-      processing: {
-        ...defaultProcessing(),
-        loudnessGainDb: analysis.loudnessGainDb,
-        detectedOnsetSec: analysis.onsetSec,
-        detectedPitch: analysis.detectedPitch,
-        role,
-        roleAuto: true,
-        pan: defaultPanForRole(role, id),
-      },
+      processing: applyAnalysis(defaultProcessing(), analysis, id),
       createdAt: now,
       updatedAt: now,
     }
@@ -111,19 +125,8 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
         recordedBpm = engine.bpm
         recordedLoopBars = engine.loopBars
         const analysis = await analyzeMonsterAudio(engine.ctx, patch.audioBlob)
-        processing = {
-          ...defaultProcessing(),
-          loudnessGainDb: analysis.loudnessGainDb,
-          detectedOnsetSec: analysis.onsetSec,
-          detectedPitch: analysis.detectedPitch,
-        }
-        // only re-suggest the role/pan if the user hasn't manually chosen one already
-        if (existing.processing.roleAuto) {
-          const role = suggestRole(analysis.spectralCentroidHz, analysis.onsetDensityPerSec)
-          processing = { ...processing, role, roleAuto: true, pan: defaultPanForRole(role, id) }
-        } else {
-          processing = { ...processing, role: existing.processing.role, roleAuto: false, pan: existing.processing.pan }
-        }
+        const keepRole = existing.processing.roleAuto ? undefined : { role: existing.processing.role, pan: existing.processing.pan }
+        processing = applyAnalysis(defaultProcessing(), analysis, id, keepRole)
       }
       if (patch.processing) {
         processing = { ...processing, ...patch.processing }
@@ -147,6 +150,25 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
         processing,
         updatedAt: Date.now(),
       }
+      await saveMonster(updated)
+      setMonsters((prev) => prev.map((m) => (m.id === id ? updated : m)))
+    },
+    [monsters],
+  )
+
+  /** Runs the analysis pass on a monster that predates "Make It Sound
+   * Good" (or whose audio was saved before analysis existed), without
+   * touching the audio blob or any toggles the user has already set. */
+  const reanalyzeMonster = useCallback(
+    async (id: string) => {
+      const existing = monsters.find((m) => m.id === id)
+      if (!existing || existing.processing.analyzed) return
+      const blob = await loadBlob(existing.audioBlobKey)
+      if (!blob) return
+      const analysis = await analyzeMonsterAudio(engine.ctx, blob)
+      const keepRole = existing.processing.roleAuto ? undefined : { role: existing.processing.role, pan: existing.processing.pan }
+      const processing = applyAnalysis(existing.processing, analysis, id, keepRole)
+      const updated: Monster = { ...existing, processing, updatedAt: Date.now() }
       await saveMonster(updated)
       setMonsters((prev) => prev.map((m) => (m.id === id ? updated : m)))
     },
@@ -199,13 +221,14 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
       loading,
       createMonster,
       updateMonster,
+      reanalyzeMonster,
       deleteMonster,
       getRawBuffer,
       previewingId,
       previewMonster,
       stopPreview,
     }),
-    [monsters, loading, createMonster, updateMonster, deleteMonster, getRawBuffer, previewingId, previewMonster, stopPreview],
+    [monsters, loading, createMonster, updateMonster, reanalyzeMonster, deleteMonster, getRawBuffer, previewingId, previewMonster, stopPreview],
   )
 
   return <MonstersContext.Provider value={value}>{children}</MonstersContext.Provider>

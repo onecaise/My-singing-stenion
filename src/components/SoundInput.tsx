@@ -13,6 +13,7 @@ interface SoundInputProps {
 
 export function SoundInput({ bpm, loopBars, value, onChange }: SoundInputProps) {
   const [recording, setRecording] = useState(false)
+  const [showTips, setShowTips] = useState(false)
   const [progress, setProgress] = useState<RecordProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [previewing, setPreviewing] = useState(false)
@@ -27,6 +28,7 @@ export function SoundInput({ bpm, loopBars, value, onChange }: SoundInputProps) 
 
   const startRecording = useCallback(async () => {
     setError(null)
+    setShowTips(false)
     stopPreview()
     await engine.resume()
     setRecording(true)
@@ -88,7 +90,7 @@ export function SoundInput({ bpm, loopBars, value, onChange }: SoundInputProps) 
         <button
           type="button"
           disabled={recording}
-          onClick={startRecording}
+          onClick={() => setShowTips(true)}
           className="flex items-center gap-2 rounded-full bg-rose-500 px-4 py-2 text-sm font-bold text-white shadow hover:bg-rose-400 disabled:opacity-50"
         >
           🎙️ {recording ? 'Recording…' : 'Record from mic'}
@@ -146,6 +148,35 @@ export function SoundInput({ bpm, loopBars, value, onChange }: SoundInputProps) 
         <p className="text-xs text-white/60">Sound ready — {(value.size / 1024).toFixed(0)} KB</p>
       )}
       {error && <p className="text-xs font-semibold text-rose-300">{error}</p>}
+
+      {showTips && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4" onMouseDown={() => setShowTips(false)}>
+          <div
+            className="w-full max-w-sm rounded-3xl bg-[#3a2a5c] p-6 text-white shadow-2xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-3 text-lg font-black">🎙️ Before you record…</h3>
+            <ul className="mb-5 space-y-2 text-sm text-white/80">
+              <li>📍 Get close to the mic</li>
+              <li>🤫 Record in a quiet room</li>
+              <li>⏳ Wait for the count-in before you start</li>
+              <li>🔁 Keep it simple and repetitive — it's a loop!</li>
+            </ul>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setShowTips(false)} className="rounded-full bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={startRecording}
+                className="rounded-full bg-amber-400 px-5 py-2 text-sm font-black text-[#3a2a5c] shadow hover:bg-amber-300"
+              >
+                Got it, start recording
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

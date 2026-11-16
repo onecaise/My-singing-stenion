@@ -34,6 +34,9 @@ export interface MonsterProcessing {
   loudnessEnabled: boolean
   roleEqEnabled: boolean
   snapToKeyEnabled: boolean
+  /** false for monsters saved before "Make It Sound Good" existed, so the
+   * big button knows which monsters still need a first analysis pass */
+  analyzed: boolean
 }
 
 export function defaultProcessing(): MonsterProcessing {
@@ -49,6 +52,7 @@ export function defaultProcessing(): MonsterProcessing {
     loudnessEnabled: true,
     roleEqEnabled: true,
     snapToKeyEnabled: true,
+    analyzed: false,
   }
 }
 

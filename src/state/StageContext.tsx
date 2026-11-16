@@ -28,6 +28,7 @@ interface StageContextValue {
   setMonsterPan: (monsterId: string, pan: number) => void
   setMonsterLoudnessEnabled: (monsterId: string, enabled: boolean) => void
   setMonsterProcessingAndRebuild: (monsterId: string, patch: Partial<MonsterProcessing>) => Promise<void>
+  makeItSoundGood: () => Promise<void>
   setBpm: (bpm: number) => Promise<void>
   setLoopBars: (bars: number) => Promise<void>
   setMasterVolume: (v: number) => void
@@ -62,7 +63,7 @@ function defaultSong(): Song {
 }
 
 export function StageProvider({ children }: { children: ReactNode }) {
-  const { monsters, getRawBuffer, updateMonster } = useMonsters()
+  const { monsters, getRawBuffer, updateMonster, reanalyzeMonster } = useMonsters()
   const [song, setSong] = useState<Song>(defaultSong)
   const [songs, setSongs] = useState<Song[]>([])
   const [isPlaying, setIsPlaying] = useState(false)
@@ -230,6 +231,24 @@ export function StageProvider({ children }: { children: ReactNode }) {
     [updateMonster, song.placedMonsters, song.bpm, song.loopBars, song.key, startVoiceFor],
   )
 
+  /** The big "Make It Sound Good" button: analyzes any placed monster that
+   * predates this feature, then turns on auto-align, loudness matching,
+   * role EQ, and snap-to-key for every monster on stage (Quantize is left
+   * alone — it defaults off because it can sound glitchy). Master bus
+   * processing (compressor/reverb/limiter) is already always-on. */
+  const makeItSoundGood = useCallback(async () => {
+    const placedIds = song.placedMonsters.map((p) => p.monsterId)
+    for (const id of placedIds) await reanalyzeMonster(id)
+    for (const id of placedIds) {
+      await setMonsterProcessingAndRebuild(id, {
+        autoAlignEnabled: true,
+        loudnessEnabled: true,
+        roleEqEnabled: true,
+        snapToKeyEnabled: true,
+      })
+    }
+  }, [song.placedMonsters, reanalyzeMonster, setMonsterProcessingAndRebuild])
+
   const resyncAll = useCallback(
     async (bpm: number, loopBars: number, songKey: SongKey) => {
       engine.stopAll()
@@ -362,6 +381,7 @@ export function StageProvider({ children }: { children: ReactNode }) {
       setMonsterPan,
       setMonsterLoudnessEnabled,
       setMonsterProcessingAndRebuild,
+      makeItSoundGood,
       setBpm,
       setLoopBars,
       setMasterVolume,
@@ -391,6 +411,7 @@ export function StageProvider({ children }: { children: ReactNode }) {
       setMonsterPan,
       setMonsterLoudnessEnabled,
       setMonsterProcessingAndRebuild,
+      makeItSoundGood,
       setBpm,
       setLoopBars,
       setMasterVolume,
