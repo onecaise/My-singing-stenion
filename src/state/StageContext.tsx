@@ -4,7 +4,7 @@ import { dbToLinear } from '../audio/analysis'
 import { engine } from '../audio/engine'
 import { prepareVoiceBuffer } from '../audio/voicePrep'
 import { deleteSong as deleteSongRecord, loadAllSongs, saveBlob, saveSong } from '../storage/db'
-import { BUILT_IN_BACKDROPS, defaultSongKey, makeId, type Backdrop, type PlacedMonster, type Song, type SongKey } from '../types'
+import { BUILT_IN_BACKDROPS, defaultSongKey, makeId, type Backdrop, type Monster, type MonsterProcessing, type PlacedMonster, type Song, type SongKey } from '../types'
 import { useMonsters } from './MonstersContext'
 
 interface VoiceStartSignal {
@@ -25,6 +25,7 @@ interface StageContextValue {
   toggleSolo: (monsterId: string) => void
   setMonsterLiveVolume: (monsterId: string, volume: number) => void
   setMonsterLoudnessEnabled: (monsterId: string, enabled: boolean) => void
+  setMonsterProcessingAndRebuild: (monsterId: string, patch: Partial<MonsterProcessing>) => Promise<void>
   setBpm: (bpm: number) => Promise<void>
   setLoopBars: (bars: number) => Promise<void>
   setMasterVolume: (v: number) => void
@@ -90,9 +91,7 @@ export function StageProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const startVoiceFor = useCallback(
-    async (placed: PlacedMonster, bpm: number, loopBars: number) => {
-      const monster = monstersRef.current.find((m) => m.id === placed.monsterId)
-      if (!monster) return
+    async (placed: PlacedMonster, monster: Monster, bpm: number, loopBars: number) => {
       const raw = await getRawBuffer(monster)
       const prepared = prepareVoiceBuffer(engine.ctx, {
         rawBuffer: raw,
@@ -101,6 +100,9 @@ export function StageProvider({ children }: { children: ReactNode }) {
         recordedLoopBars: monster.recordedLoopBars,
         currentBpm: bpm,
         currentLoopBars: loopBars,
+        detectedOnsetSec: monster.processing.detectedOnsetSec,
+        autoAlignEnabled: monster.processing.autoAlignEnabled,
+        quantizeEnabled: monster.processing.quantizeEnabled,
       })
       const loudnessGainLinear = monster.processing.loudnessEnabled ? dbToLinear(monster.processing.loudnessGainDb) : 1
       const { delayMs } = engine.addVoice(placed.monsterId, {
@@ -127,12 +129,14 @@ export function StageProvider({ children }: { children: ReactNode }) {
 
   const placeMonster = useCallback(
     async (monsterId: string, x: number, y: number) => {
+      const monster = monstersRef.current.find((m) => m.id === monsterId)
+      if (!monster) return
       await engine.resume()
       setSong((prev) => {
         if (prev.placedMonsters.some((p) => p.monsterId === monsterId)) return prev
         return { ...prev, placedMonsters: [...prev.placedMonsters, { monsterId, x, y, muted: false, soloed: false }], updatedAt: Date.now() }
       })
-      await startVoiceFor({ monsterId, x, y, muted: false, soloed: false }, song.bpm, song.loopBars)
+      await startVoiceFor({ monsterId, x, y, muted: false, soloed: false }, monster, song.bpm, song.loopBars)
       setIsPlaying(true)
     },
     [startVoiceFor, song.bpm, song.loopBars],
@@ -192,6 +196,22 @@ export function StageProvider({ children }: { children: ReactNode }) {
     [updateMonster],
   )
 
+  /** Toggles that bake into the prepared buffer (align/quantize/role-EQ/
+   * snap-to-key) need the voice rebuilt to take effect. Builds the rebuilt
+   * monster locally instead of waiting on React state so the change is
+   * audible immediately. */
+  const setMonsterProcessingAndRebuild = useCallback(
+    async (monsterId: string, patch: Partial<MonsterProcessing>) => {
+      const existing = monstersRef.current.find((m) => m.id === monsterId)
+      if (!existing) return
+      const merged: Monster = { ...existing, processing: { ...existing.processing, ...patch } }
+      void updateMonster(monsterId, { processing: patch })
+      const placed = song.placedMonsters.find((p) => p.monsterId === monsterId)
+      if (placed) await startVoiceFor(placed, merged, song.bpm, song.loopBars)
+    },
+    [updateMonster, song.placedMonsters, song.bpm, song.loopBars, startVoiceFor],
+  )
+
   const resyncAll = useCallback(
     async (bpm: number, loopBars: number) => {
       engine.stopAll()
@@ -202,7 +222,12 @@ export function StageProvider({ children }: { children: ReactNode }) {
         setIsPlaying(false)
         return
       }
-      await Promise.all(current.map((p) => startVoiceFor(p, bpm, loopBars)))
+      await Promise.all(
+        current.map((p) => {
+          const monster = monstersRef.current.find((m) => m.id === p.monsterId)
+          return monster ? startVoiceFor(p, monster, bpm, loopBars) : undefined
+        }),
+      )
       setIsPlaying(true)
     },
     [song.placedMonsters, startVoiceFor],
@@ -274,7 +299,12 @@ export function StageProvider({ children }: { children: ReactNode }) {
         engine.setBpm(target.bpm)
         engine.setLoopBars(target.loopBars)
         engine.setMasterVolume(target.masterVolume)
-        await Promise.all(target.placedMonsters.map((p) => startVoiceFor(p, target.bpm, target.loopBars)))
+        await Promise.all(
+          target.placedMonsters.map((p) => {
+            const monster = monstersRef.current.find((m) => m.id === p.monsterId)
+            return monster ? startVoiceFor(p, monster, target.bpm, target.loopBars) : undefined
+          }),
+        )
         setIsPlaying(true)
       } else {
         setIsPlaying(false)
@@ -308,6 +338,7 @@ export function StageProvider({ children }: { children: ReactNode }) {
       toggleSolo,
       setMonsterLiveVolume,
       setMonsterLoudnessEnabled,
+      setMonsterProcessingAndRebuild,
       setBpm,
       setLoopBars,
       setMasterVolume,
@@ -335,6 +366,7 @@ export function StageProvider({ children }: { children: ReactNode }) {
       toggleSolo,
       setMonsterLiveVolume,
       setMonsterLoudnessEnabled,
+      setMonsterProcessingAndRebuild,
       setBpm,
       setLoopBars,
       setMasterVolume,

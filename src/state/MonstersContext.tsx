@@ -76,7 +76,7 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
       offsetSec: input.offsetSec,
       recordedBpm: engine.bpm,
       recordedLoopBars: engine.loopBars,
-      processing: { ...defaultProcessing(), loudnessGainDb: analysis.loudnessGainDb },
+      processing: { ...defaultProcessing(), loudnessGainDb: analysis.loudnessGainDb, detectedOnsetSec: analysis.onsetSec },
       createdAt: now,
       updatedAt: now,
     }
@@ -100,7 +100,7 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
         recordedBpm = engine.bpm
         recordedLoopBars = engine.loopBars
         const analysis = await analyzeMonsterAudio(engine.ctx, patch.audioBlob)
-        processing = { ...defaultProcessing(), loudnessGainDb: analysis.loudnessGainDb }
+        processing = { ...defaultProcessing(), loudnessGainDb: analysis.loudnessGainDb, detectedOnsetSec: analysis.onsetSec }
       }
       if (patch.processing) {
         processing = { ...processing, ...patch.processing }

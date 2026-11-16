@@ -4,7 +4,7 @@ import { MonsterFace } from './MonsterFace'
 
 export function MixerDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { monsters } = useMonsters()
-  const { song, toggleMute, toggleSolo, setMonsterLiveVolume, setMonsterLoudnessEnabled } = useStage()
+  const { song, toggleMute, toggleSolo, setMonsterLiveVolume, setMonsterLoudnessEnabled, setMonsterProcessingAndRebuild } = useStage()
 
   if (!open) return null
 
@@ -60,14 +60,32 @@ export function MixerDrawer({ open, onClose }: { open: boolean; onClose: () => v
               />
             </label>
 
-            <label className="flex items-center gap-1.5 text-[10px] font-bold text-white/60">
-              <input
-                type="checkbox"
-                checked={monster.processing.loudnessEnabled}
-                onChange={(e) => setMonsterLoudnessEnabled(placed.monsterId, e.target.checked)}
-              />
-              Loudness match
-            </label>
+            <div className="flex flex-col gap-1">
+              <label className="flex items-center gap-1.5 text-[10px] font-bold text-white/60">
+                <input
+                  type="checkbox"
+                  checked={monster.processing.loudnessEnabled}
+                  onChange={(e) => setMonsterLoudnessEnabled(placed.monsterId, e.target.checked)}
+                />
+                Loudness match
+              </label>
+              <label className="flex items-center gap-1.5 text-[10px] font-bold text-white/60">
+                <input
+                  type="checkbox"
+                  checked={monster.processing.autoAlignEnabled}
+                  onChange={(e) => void setMonsterProcessingAndRebuild(placed.monsterId, { autoAlignEnabled: e.target.checked })}
+                />
+                Auto-align to beat 1
+              </label>
+              <label className="flex items-center gap-1.5 text-[10px] font-bold text-white/60">
+                <input
+                  type="checkbox"
+                  checked={monster.processing.quantizeEnabled}
+                  onChange={(e) => void setMonsterProcessingAndRebuild(placed.monsterId, { quantizeEnabled: e.target.checked })}
+                />
+                Quantize (can sound glitchy)
+              </label>
+            </div>
           </div>
         )
       })}
