@@ -1,4 +1,4 @@
-import { barDurationSec, loopDurationSec } from './buffers'
+import { barDurationSec, loopDurationSec, renderRoomImpulseResponse } from './buffers'
 import { BEATS_PER_BAR } from '../types'
 
 export interface VoiceInput {
@@ -32,6 +32,14 @@ export interface BeatInfo {
 
 const RAMP_SEC = 0.025
 
+/** How much the master bus auto-ducks as more monsters join the stage, so
+ * a crowded song doesn't get louder (and closer to clipping) than a sparse
+ * one. Tuned gently so it's felt, not heard. */
+function duckGainFor(voiceCount: number): number {
+  if (voiceCount <= 1) return 1
+  return Math.max(0.55, 1 - 0.06 * (voiceCount - 1))
+}
+
 /**
  * Owns the single AudioContext and the bar-aligned transport clock.
  * Deliberately has no React/UI dependencies so it can be unit tested and
@@ -39,6 +47,13 @@ const RAMP_SEC = 0.025
  */
 export class StewnionAudioEngine {
   private _ctx: AudioContext | null = null
+  /** sum of all voices, pre master-processing */
+  private _voiceBus: GainNode | null = null
+  /** auto-reduces as more monsters are added */
+  private _duckGain: GainNode | null = null
+  /** shared room reverb send, fed by the glue bus and by individual voices */
+  private _convolver: ConvolverNode | null = null
+  /** final user-facing volume control, after limiting */
   private _master: GainNode | null = null
   private voices = new Map<string, Voice>()
   private transportStartTime: number | null = null
@@ -48,12 +63,67 @@ export class StewnionAudioEngine {
   get ctx(): AudioContext {
     if (!this._ctx) {
       const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-      this._ctx = new Ctor()
-      this._master = this._ctx.createGain()
-      this._master.gain.value = 0.9
-      this._master.connect(this._ctx.destination)
+      const ctx = new Ctor()
+      this._ctx = ctx
+
+      const voiceBus = ctx.createGain()
+      const duckGain = ctx.createGain()
+      duckGain.gain.value = 1
+      const glueComp = ctx.createDynamicsCompressor()
+      glueComp.ratio.value = 3
+      glueComp.threshold.value = -18
+      glueComp.knee.value = 12
+      glueComp.attack.value = 0.02
+      glueComp.release.value = 0.25
+
+      const convolver = ctx.createConvolver()
+      convolver.normalize = true
+      convolver.buffer = renderRoomImpulseResponse(ctx)
+      const reverbReturn = ctx.createGain()
+      reverbReturn.gain.value = 0.8
+      const sharedSend = ctx.createGain()
+      sharedSend.gain.value = 0.1
+
+      const limiterInput = ctx.createGain()
+      const limiter = ctx.createDynamicsCompressor()
+      limiter.ratio.value = 20
+      limiter.threshold.value = -2
+      limiter.knee.value = 0
+      limiter.attack.value = 0.001
+      limiter.release.value = 0.1
+
+      const master = ctx.createGain()
+      master.gain.value = 0.9
+
+      voiceBus.connect(duckGain)
+      duckGain.connect(glueComp)
+      glueComp.connect(limiterInput)
+      glueComp.connect(sharedSend)
+      sharedSend.connect(convolver)
+      convolver.connect(reverbReturn)
+      reverbReturn.connect(limiterInput)
+      limiterInput.connect(limiter)
+      limiter.connect(master)
+      master.connect(ctx.destination)
+
+      this._voiceBus = voiceBus
+      this._duckGain = duckGain
+      this._convolver = convolver
+      this._master = master
     }
     return this._ctx
+  }
+
+  /** Where voices should connect for the dry signal. */
+  get voiceBus(): GainNode {
+    void this.ctx
+    return this._voiceBus!
+  }
+
+  /** Where a voice's individual reverb send should connect. */
+  get reverbSendTarget(): ConvolverNode {
+    void this.ctx
+    return this._convolver!
   }
 
   get master(): GainNode {
@@ -122,10 +192,11 @@ export class StewnionAudioEngine {
     source.playbackRate.value = input.playbackRate
     const gain = ctx.createGain()
     gain.gain.value = 0
-    source.connect(gain).connect(this.master)
+    source.connect(gain).connect(this.voiceBus)
     source.start(startAt)
     this.voices.set(id, { source, gain, volume: input.volume, muted: input.muted, soloed: input.soloed })
     this.applyGains()
+    this.updateDuckGain()
     return { startAt, delayMs: Math.max(0, (startAt - ctx.currentTime) * 1000) }
   }
 
@@ -142,11 +213,19 @@ export class StewnionAudioEngine {
       // already stopped
     }
     this.voices.delete(id)
+    this.updateDuckGain()
   }
 
   stopAll(): void {
     for (const id of Array.from(this.voices.keys())) this.removeVoice(id)
     this.transportStartTime = null
+  }
+
+  /** Auto-reduces the master bus gain a little as more monsters join, so a
+   * crowded stage doesn't push the limiter harder than a sparse one. */
+  private updateDuckGain(): void {
+    const target = duckGainFor(this.voices.size)
+    this._duckGain!.gain.setTargetAtTime(target, this.ctx.currentTime, 0.3)
   }
 
   setVolume(id: string, volume: number): void {

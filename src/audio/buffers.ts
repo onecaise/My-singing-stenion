@@ -82,3 +82,23 @@ export function renderClickBuffer(ctx: BaseAudioContext, accent: boolean): Audio
   }
   return buffer
 }
+
+/**
+ * Synthesizes a small, plausible-sounding room impulse response (dense noise
+ * with an exponential decay, slightly different per channel for width) so
+ * the master reverb send doesn't need an external IR file.
+ */
+export function renderRoomImpulseResponse(ctx: BaseAudioContext, durationSec = 1.3, decay = 3.2): AudioBuffer {
+  const sampleRate = ctx.sampleRate
+  const length = Math.round(durationSec * sampleRate)
+  const buffer = ctx.createBuffer(2, length, sampleRate)
+  for (let ch = 0; ch < 2; ch++) {
+    const data = buffer.getChannelData(ch)
+    for (let i = 0; i < length; i++) {
+      const t = i / length
+      const envelope = Math.pow(1 - t, decay)
+      data[i] = (Math.random() * 2 - 1) * envelope
+    }
+  }
+  return buffer
+}
