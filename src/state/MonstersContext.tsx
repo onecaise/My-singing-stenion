@@ -83,6 +83,7 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
         ...defaultProcessing(),
         loudnessGainDb: analysis.loudnessGainDb,
         detectedOnsetSec: analysis.onsetSec,
+        detectedPitch: analysis.detectedPitch,
         role,
         roleAuto: true,
         pan: defaultPanForRole(role, id),
@@ -110,7 +111,12 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
         recordedBpm = engine.bpm
         recordedLoopBars = engine.loopBars
         const analysis = await analyzeMonsterAudio(engine.ctx, patch.audioBlob)
-        processing = { ...defaultProcessing(), loudnessGainDb: analysis.loudnessGainDb, detectedOnsetSec: analysis.onsetSec }
+        processing = {
+          ...defaultProcessing(),
+          loudnessGainDb: analysis.loudnessGainDb,
+          detectedOnsetSec: analysis.onsetSec,
+          detectedPitch: analysis.detectedPitch,
+        }
         // only re-suggest the role/pan if the user hasn't manually chosen one already
         if (existing.processing.roleAuto) {
           const role = suggestRole(analysis.spectralCentroidHz, analysis.onsetDensityPerSec)

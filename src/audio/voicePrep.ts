@@ -1,5 +1,8 @@
 import { barDurationSec, fitBufferToDuration, loopDurationSec, rotateBuffer } from './buffers'
+import { nearestSemitoneShiftToKey } from './key'
+import { pitchShiftBuffer } from './pitchShift'
 import { quantizeBuffer } from './quantize'
+import type { DetectedPitch, MonsterRole, SongKey } from '../types'
 
 export interface VoicePrepParams {
   rawBuffer: AudioBuffer
@@ -16,6 +19,10 @@ export interface VoicePrepParams {
   /** nudges detected transients onto the nearest 16th note; off by default
    * because the simple slice-resample it uses can sound glitchy */
   quantizeEnabled: boolean
+  role: MonsterRole
+  detectedPitch: DetectedPitch | null
+  snapToKeyEnabled: boolean
+  songKey: SongKey
 }
 
 export interface PreparedVoice {
@@ -37,8 +44,13 @@ export interface PreparedVoice {
 export function prepareVoiceBuffer(ctx: BaseAudioContext, params: VoicePrepParams): PreparedVoice {
   const recordedDuration = loopDurationSec(params.recordedBpm, params.recordedLoopBars)
   const fitted = fitBufferToDuration(ctx, params.rawBuffer, recordedDuration)
+
+  const canSnapToKey = params.snapToKeyEnabled && params.detectedPitch && (params.role === 'melody' || params.role === 'chords')
+  const semitoneShift = canSnapToKey ? nearestSemitoneShiftToKey(params.detectedPitch!, params.songKey) : 0
+  const inKey = semitoneShift !== 0 ? pitchShiftBuffer(ctx, fitted, semitoneShift) : fitted
+
   const alignOffset = params.autoAlignEnabled ? params.detectedOnsetSec : 0
-  const rotated = rotateBuffer(ctx, fitted, alignOffset + params.offsetSec)
+  const rotated = rotateBuffer(ctx, inKey, alignOffset + params.offsetSec)
   const gridStepSec = barDurationSec(params.recordedBpm) / 16
   const quantized = params.quantizeEnabled ? quantizeBuffer(ctx, rotated, gridStepSec) : rotated
   const currentDuration = loopDurationSec(params.currentBpm, params.currentLoopBars)

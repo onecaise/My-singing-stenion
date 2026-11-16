@@ -31,7 +31,7 @@ interface StageContextValue {
   setBpm: (bpm: number) => Promise<void>
   setLoopBars: (bars: number) => Promise<void>
   setMasterVolume: (v: number) => void
-  setSongKey: (key: SongKey) => void
+  setSongKey: (key: SongKey) => Promise<void>
   setBackdrop: (b: Backdrop) => void
   uploadBackdrop: (file: File) => Promise<void>
   playAll: () => Promise<void>
@@ -93,7 +93,7 @@ export function StageProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const startVoiceFor = useCallback(
-    async (placed: PlacedMonster, monster: Monster, bpm: number, loopBars: number) => {
+    async (placed: PlacedMonster, monster: Monster, bpm: number, loopBars: number, songKey: SongKey) => {
       const raw = await getRawBuffer(monster)
       const prepared = prepareVoiceBuffer(engine.ctx, {
         rawBuffer: raw,
@@ -105,6 +105,10 @@ export function StageProvider({ children }: { children: ReactNode }) {
         detectedOnsetSec: monster.processing.detectedOnsetSec,
         autoAlignEnabled: monster.processing.autoAlignEnabled,
         quantizeEnabled: monster.processing.quantizeEnabled,
+        role: monster.processing.role,
+        detectedPitch: monster.processing.detectedPitch,
+        snapToKeyEnabled: monster.processing.snapToKeyEnabled,
+        songKey,
       })
       const loudnessGainLinear = monster.processing.loudnessEnabled ? dbToLinear(monster.processing.loudnessGainDb) : 1
       const { delayMs } = engine.addVoice(placed.monsterId, {
@@ -142,10 +146,10 @@ export function StageProvider({ children }: { children: ReactNode }) {
         if (prev.placedMonsters.some((p) => p.monsterId === monsterId)) return prev
         return { ...prev, placedMonsters: [...prev.placedMonsters, { monsterId, x, y, muted: false, soloed: false }], updatedAt: Date.now() }
       })
-      await startVoiceFor({ monsterId, x, y, muted: false, soloed: false }, monster, song.bpm, song.loopBars)
+      await startVoiceFor({ monsterId, x, y, muted: false, soloed: false }, monster, song.bpm, song.loopBars, song.key)
       setIsPlaying(true)
     },
-    [startVoiceFor, song.bpm, song.loopBars],
+    [startVoiceFor, song.bpm, song.loopBars, song.key],
   )
 
   const moveMonster = useCallback((monsterId: string, x: number, y: number) => {
@@ -221,13 +225,13 @@ export function StageProvider({ children }: { children: ReactNode }) {
       const merged: Monster = { ...existing, processing: { ...existing.processing, ...patch } }
       void updateMonster(monsterId, { processing: patch })
       const placed = song.placedMonsters.find((p) => p.monsterId === monsterId)
-      if (placed) await startVoiceFor(placed, merged, song.bpm, song.loopBars)
+      if (placed) await startVoiceFor(placed, merged, song.bpm, song.loopBars, song.key)
     },
-    [updateMonster, song.placedMonsters, song.bpm, song.loopBars, startVoiceFor],
+    [updateMonster, song.placedMonsters, song.bpm, song.loopBars, song.key, startVoiceFor],
   )
 
   const resyncAll = useCallback(
-    async (bpm: number, loopBars: number) => {
+    async (bpm: number, loopBars: number, songKey: SongKey) => {
       engine.stopAll()
       engine.setBpm(bpm)
       engine.setLoopBars(loopBars)
@@ -239,7 +243,7 @@ export function StageProvider({ children }: { children: ReactNode }) {
       await Promise.all(
         current.map((p) => {
           const monster = monstersRef.current.find((m) => m.id === p.monsterId)
-          return monster ? startVoiceFor(p, monster, bpm, loopBars) : undefined
+          return monster ? startVoiceFor(p, monster, bpm, loopBars, songKey) : undefined
         }),
       )
       setIsPlaying(true)
@@ -250,17 +254,17 @@ export function StageProvider({ children }: { children: ReactNode }) {
   const setBpm = useCallback(
     async (bpm: number) => {
       setSong((prev) => ({ ...prev, bpm, updatedAt: Date.now() }))
-      await resyncAll(bpm, song.loopBars)
+      await resyncAll(bpm, song.loopBars, song.key)
     },
-    [resyncAll, song.loopBars],
+    [resyncAll, song.loopBars, song.key],
   )
 
   const setLoopBars = useCallback(
     async (bars: number) => {
       setSong((prev) => ({ ...prev, loopBars: bars, updatedAt: Date.now() }))
-      await resyncAll(song.bpm, bars)
+      await resyncAll(song.bpm, bars, song.key)
     },
-    [resyncAll, song.bpm],
+    [resyncAll, song.bpm, song.key],
   )
 
   const setMasterVolume = useCallback((v: number) => {
@@ -268,9 +272,13 @@ export function StageProvider({ children }: { children: ReactNode }) {
     setSong((prev) => ({ ...prev, masterVolume: v }))
   }, [])
 
-  const setSongKey = useCallback((key: SongKey) => {
-    setSong((prev) => ({ ...prev, key, updatedAt: Date.now() }))
-  }, [])
+  const setSongKey = useCallback(
+    async (key: SongKey) => {
+      setSong((prev) => ({ ...prev, key, updatedAt: Date.now() }))
+      await resyncAll(song.bpm, song.loopBars, key)
+    },
+    [resyncAll, song.bpm, song.loopBars],
+  )
 
   const setBackdrop = useCallback((b: Backdrop) => {
     setSong((prev) => ({ ...prev, backdrop: b, updatedAt: Date.now() }))
@@ -283,8 +291,8 @@ export function StageProvider({ children }: { children: ReactNode }) {
 
   const playAll = useCallback(async () => {
     await engine.resume()
-    await resyncAll(song.bpm, song.loopBars)
-  }, [resyncAll, song.bpm, song.loopBars])
+    await resyncAll(song.bpm, song.loopBars, song.key)
+  }, [resyncAll, song.bpm, song.loopBars, song.key])
 
   const stopAllFn = useCallback(() => {
     engine.stopAll()
@@ -316,7 +324,7 @@ export function StageProvider({ children }: { children: ReactNode }) {
         await Promise.all(
           target.placedMonsters.map((p) => {
             const monster = monstersRef.current.find((m) => m.id === p.monsterId)
-            return monster ? startVoiceFor(p, monster, target.bpm, target.loopBars) : undefined
+            return monster ? startVoiceFor(p, monster, target.bpm, target.loopBars, target.key) : undefined
           }),
         )
         setIsPlaying(true)

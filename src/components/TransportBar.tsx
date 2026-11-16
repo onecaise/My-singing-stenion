@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { engine } from '../audio/engine'
 import { exportMasterLoops } from '../audio/exporter'
 import { useStage } from '../state/StageContext'
+import { NOTE_NAMES, type MusicalMode } from '../types'
 import { BeatIndicator } from './BeatIndicator'
 
 export function TransportBar({ mixerOpen, onToggleMixer }: { mixerOpen: boolean; onToggleMixer: () => void }) {
-  const { song, isPlaying, tempoMismatch, setBpm, setLoopBars, setMasterVolume, playAll, stopAll } = useStage()
+  const { song, isPlaying, tempoMismatch, setBpm, setLoopBars, setMasterVolume, setSongKey, playAll, stopAll } = useStage()
   const [exportLoops, setExportLoops] = useState(4)
   const [exporting, setExporting] = useState(false)
 
@@ -64,6 +65,33 @@ export function TransportBar({ mixerOpen, onToggleMixer }: { mixerOpen: boolean;
               {n}
             </option>
           ))}
+        </select>
+      </label>
+
+      <label className="flex items-center gap-2 text-xs font-bold">
+        Key
+        <select
+          value={song.key.tonic}
+          onChange={(e) => void setSongKey({ ...song.key, tonic: e.target.value })}
+          className="rounded-lg bg-white/10 px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-amber-300"
+        >
+          {NOTE_NAMES.map((n) => (
+            <option key={n} value={n} className="text-black">
+              {n}
+            </option>
+          ))}
+        </select>
+        <select
+          value={song.key.mode}
+          onChange={(e) => void setSongKey({ ...song.key, mode: e.target.value as MusicalMode })}
+          className="rounded-lg bg-white/10 px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-amber-300"
+        >
+          <option value="major" className="text-black">
+            major
+          </option>
+          <option value="minor" className="text-black">
+            minor
+          </option>
         </select>
       </label>
 

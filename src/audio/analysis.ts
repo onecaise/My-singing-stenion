@@ -4,7 +4,9 @@
  * no playback, no side effects — so it's safe to run right after a
  * recording/upload finishes.
  */
+import { PitchDetector } from 'pitchy'
 import { decodeBlobToBuffer } from './buffers'
+import { NOTE_NAMES, type DetectedPitch } from '../types'
 
 const MIN_DB = -60
 
@@ -154,11 +156,62 @@ export function estimateSpectralCentroidHz(buffer: AudioBuffer): number {
   return weightedSum / totalMag
 }
 
+function midiToNoteName(midi: number): string {
+  const rounded = Math.round(midi)
+  const name = NOTE_NAMES[((rounded % 12) + 12) % 12]
+  const octave = Math.floor(rounded / 12) - 1
+  return `${name}${octave}`
+}
+
+function freqToMidi(freqHz: number): number {
+  return 69 + 12 * Math.log2(freqHz / 440)
+}
+
+const PITCH_FRAME_SIZE = 2048
+const PITCH_CLARITY_THRESHOLD = 0.85
+
+/** Estimates the loop's main pitch using the McLeod pitch method (via the
+ * `pitchy` library), scanning overlapping frames and taking the most
+ * common clearly-detected note. Returns null if nothing was clear enough
+ * (e.g. a percussive or unpitched loop). */
+export function detectDominantPitch(buffer: AudioBuffer): DetectedPitch | null {
+  const mono = toMono(buffer)
+  if (mono.length < PITCH_FRAME_SIZE) return null
+  const sampleRate = buffer.sampleRate
+  const detector = PitchDetector.forFloat32Array(PITCH_FRAME_SIZE)
+  detector.minVolumeDecibels = -40
+
+  const hop = PITCH_FRAME_SIZE
+  const votes = new Map<number, { count: number; clarity: number }>()
+  for (let start = 0; start + PITCH_FRAME_SIZE <= mono.length; start += hop) {
+    const frame = mono.subarray(start, start + PITCH_FRAME_SIZE)
+    const [freqHz, clarity] = detector.findPitch(frame, sampleRate)
+    if (clarity < PITCH_CLARITY_THRESHOLD || freqHz <= 0) continue
+    const midi = Math.round(freqToMidi(freqHz))
+    const entry = votes.get(midi) ?? { count: 0, clarity: 0 }
+    entry.count += 1
+    entry.clarity = Math.max(entry.clarity, clarity)
+    votes.set(midi, entry)
+  }
+
+  let bestMidi: number | null = null
+  let best = { count: 0, clarity: 0 }
+  for (const [midi, entry] of votes) {
+    if (entry.count > best.count) {
+      bestMidi = midi
+      best = entry
+    }
+  }
+  if (bestMidi === null) return null
+  return { midi: bestMidi, noteName: midiToNoteName(bestMidi), clarity: best.clarity }
+}
+
 export interface AudioAnalysis {
   loudnessGainDb: number
   onsetSec: number
   spectralCentroidHz: number
   onsetDensityPerSec: number
+  detectedPitch: DetectedPitch | null
 }
 
 /** Runs the full "Make It Sound Good" analysis pipeline on a monster's raw
@@ -171,5 +224,6 @@ export async function analyzeMonsterAudio(ctx: BaseAudioContext, blob: Blob): Pr
     onsetSec: detectOnsetSec(buffer),
     spectralCentroidHz: estimateSpectralCentroidHz(buffer),
     onsetDensityPerSec: detectOnsets(buffer).length / durationSec,
+    detectedPitch: detectDominantPitch(buffer),
   }
 }

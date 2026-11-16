@@ -1,3 +1,4 @@
+import { pitchFitsKey } from '../audio/key'
 import { ALL_ROLES, ROLE_LABELS, defaultPanForRole } from '../audio/roles'
 import { useMonsters } from '../state/MonstersContext'
 import { useStage } from '../state/StageContext'
@@ -28,7 +29,17 @@ export function MixerDrawer({ open, onClose }: { open: boolean; onClose: () => v
           <div key={placed.monsterId} className="rounded-xl bg-white/5 p-2.5">
             <div className="mb-1.5 flex items-center gap-2">
               <MonsterFace monster={monster} size={28} />
-              <p className="flex-1 truncate text-xs font-bold text-white">{monster.name}</p>
+              <div className="flex-1 truncate">
+                <p className="truncate text-xs font-bold text-white">{monster.name}</p>
+                {monster.processing.detectedPitch && (
+                  <p className="flex items-center gap-1 text-[10px] font-semibold text-white/50">
+                    {monster.processing.detectedPitch.noteName}
+                    {!pitchFitsKey(monster.processing.detectedPitch, song.key) && (
+                      <span title={`Clashes with ${song.key.tonic} ${song.key.mode}`}>⚠️</span>
+                    )}
+                  </p>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => toggleSolo(placed.monsterId)}
@@ -102,6 +113,16 @@ export function MixerDrawer({ open, onClose }: { open: boolean; onClose: () => v
                 />
                 Role EQ
               </label>
+              {(monster.processing.role === 'melody' || monster.processing.role === 'chords') && monster.processing.detectedPitch && (
+                <label className="flex items-center gap-1.5 text-[10px] font-bold text-white/60">
+                  <input
+                    type="checkbox"
+                    checked={monster.processing.snapToKeyEnabled}
+                    onChange={(e) => void setMonsterProcessingAndRebuild(placed.monsterId, { snapToKeyEnabled: e.target.checked })}
+                  />
+                  Snap to key
+                </label>
+              )}
               <label className="flex items-center gap-1.5 text-[10px] font-bold text-white/60">
                 <input
                   type="checkbox"
