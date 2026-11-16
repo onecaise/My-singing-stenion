@@ -4,7 +4,7 @@ import { exportMasterLoops } from '../audio/exporter'
 import { useStage } from '../state/StageContext'
 import { BeatIndicator } from './BeatIndicator'
 
-export function TransportBar() {
+export function TransportBar({ mixerOpen, onToggleMixer }: { mixerOpen: boolean; onToggleMixer: () => void }) {
   const { song, isPlaying, tempoMismatch, setBpm, setLoopBars, setMasterVolume, playAll, stopAll } = useStage()
   const [exportLoops, setExportLoops] = useState(4)
   const [exporting, setExporting] = useState(false)
@@ -87,6 +87,15 @@ export function TransportBar() {
       )}
 
       <div className="ml-auto flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggleMixer}
+          className={`rounded-full px-4 py-2 text-sm font-black shadow ${
+            mixerOpen ? 'bg-amber-300 text-[#3a2a5c]' : 'bg-white/10 text-white hover:bg-white/20'
+          }`}
+        >
+          🎚️ Mixer
+        </button>
         <label className="flex items-center gap-1 text-xs font-bold">
           Export
           <input

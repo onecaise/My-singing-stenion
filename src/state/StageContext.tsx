@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { dbToLinear } from '../audio/analysis'
 import { engine } from '../audio/engine'
 import { prepareVoiceBuffer } from '../audio/voicePrep'
 import { deleteSong as deleteSongRecord, loadAllSongs, saveBlob, saveSong } from '../storage/db'
-import { BUILT_IN_BACKDROPS, makeId, type Backdrop, type PlacedMonster, type Song } from '../types'
+import { BUILT_IN_BACKDROPS, defaultSongKey, makeId, type Backdrop, type PlacedMonster, type Song, type SongKey } from '../types'
 import { useMonsters } from './MonstersContext'
 
 interface VoiceStartSignal {
@@ -22,9 +23,12 @@ interface StageContextValue {
   removeMonster: (monsterId: string) => void
   toggleMute: (monsterId: string) => void
   toggleSolo: (monsterId: string) => void
+  setMonsterLiveVolume: (monsterId: string, volume: number) => void
+  setMonsterLoudnessEnabled: (monsterId: string, enabled: boolean) => void
   setBpm: (bpm: number) => Promise<void>
   setLoopBars: (bars: number) => Promise<void>
   setMasterVolume: (v: number) => void
+  setSongKey: (key: SongKey) => void
   setBackdrop: (b: Backdrop) => void
   uploadBackdrop: (file: File) => Promise<void>
   playAll: () => Promise<void>
@@ -48,13 +52,14 @@ function defaultSong(): Song {
     bpm: 100,
     loopBars: 2,
     masterVolume: 0.9,
+    key: defaultSongKey(),
     createdAt: now,
     updatedAt: now,
   }
 }
 
 export function StageProvider({ children }: { children: ReactNode }) {
-  const { monsters, getRawBuffer } = useMonsters()
+  const { monsters, getRawBuffer, updateMonster } = useMonsters()
   const [song, setSong] = useState<Song>(defaultSong)
   const [songs, setSongs] = useState<Song[]>([])
   const [isPlaying, setIsPlaying] = useState(false)
@@ -97,12 +102,14 @@ export function StageProvider({ children }: { children: ReactNode }) {
         currentBpm: bpm,
         currentLoopBars: loopBars,
       })
+      const loudnessGainLinear = monster.processing.loudnessEnabled ? dbToLinear(monster.processing.loudnessGainDb) : 1
       const { delayMs } = engine.addVoice(placed.monsterId, {
         buffer: prepared.buffer,
         playbackRate: prepared.playbackRate,
         volume: monster.volume,
         muted: placed.muted,
         soloed: placed.soloed,
+        loudnessGainLinear,
       })
       markStarted(placed.monsterId, delayMs)
     },
@@ -167,6 +174,24 @@ export function StageProvider({ children }: { children: ReactNode }) {
     }))
   }, [])
 
+  const setMonsterLiveVolume = useCallback(
+    (monsterId: string, volume: number) => {
+      engine.setVolume(monsterId, volume)
+      void updateMonster(monsterId, { volume })
+    },
+    [updateMonster],
+  )
+
+  const setMonsterLoudnessEnabled = useCallback(
+    (monsterId: string, enabled: boolean) => {
+      const monster = monstersRef.current.find((m) => m.id === monsterId)
+      if (!monster) return
+      engine.setLoudnessGain(monsterId, enabled ? dbToLinear(monster.processing.loudnessGainDb) : 1)
+      void updateMonster(monsterId, { processing: { loudnessEnabled: enabled } })
+    },
+    [updateMonster],
+  )
+
   const resyncAll = useCallback(
     async (bpm: number, loopBars: number) => {
       engine.stopAll()
@@ -202,6 +227,10 @@ export function StageProvider({ children }: { children: ReactNode }) {
   const setMasterVolume = useCallback((v: number) => {
     engine.setMasterVolume(v)
     setSong((prev) => ({ ...prev, masterVolume: v }))
+  }, [])
+
+  const setSongKey = useCallback((key: SongKey) => {
+    setSong((prev) => ({ ...prev, key, updatedAt: Date.now() }))
   }, [])
 
   const setBackdrop = useCallback((b: Backdrop) => {
@@ -277,9 +306,12 @@ export function StageProvider({ children }: { children: ReactNode }) {
       removeMonster,
       toggleMute,
       toggleSolo,
+      setMonsterLiveVolume,
+      setMonsterLoudnessEnabled,
       setBpm,
       setLoopBars,
       setMasterVolume,
+      setSongKey,
       setBackdrop,
       uploadBackdrop,
       playAll,
@@ -301,9 +333,12 @@ export function StageProvider({ children }: { children: ReactNode }) {
       removeMonster,
       toggleMute,
       toggleSolo,
+      setMonsterLiveVolume,
+      setMonsterLoudnessEnabled,
       setBpm,
       setLoopBars,
       setMasterVolume,
+      setSongKey,
       setBackdrop,
       uploadBackdrop,
       playAll,

@@ -1,6 +1,7 @@
 import { DndContext, DragOverlay, PointerSensor, TouchSensor, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core'
 import { useRef, useState } from 'react'
 import { BackdropView } from '../components/Backdrop'
+import { MixerDrawer } from '../components/MixerDrawer'
 import { MonsterFace } from '../components/MonsterFace'
 import { SongManagerBar } from '../components/SongManagerBar'
 import { StageMonster } from '../components/StageMonster'
@@ -20,6 +21,7 @@ export function SongPanel() {
   const { song, isPlaying, voiceStartSignals, placeMonster, moveMonster, removeMonster, toggleMute, toggleSolo } = useStage()
   const stageBoxRef = useRef<HTMLDivElement | null>(null)
   const [activeDrag, setActiveDrag] = useState<DragData | null>(null)
+  const [mixerOpen, setMixerOpen] = useState(false)
 
   const { setNodeRef: setStageDroppableRef, isOver } = useDroppable({ id: 'stage' })
 
@@ -61,7 +63,7 @@ export function SongPanel() {
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="flex h-full flex-col">
         <SongManagerBar />
-        <TransportBar />
+        <TransportBar mixerOpen={mixerOpen} onToggleMixer={() => setMixerOpen((v) => !v)} />
         <div className="flex min-h-0 flex-1">
           <div
             ref={(node) => {
@@ -98,6 +100,8 @@ export function SongPanel() {
               )
             })}
           </div>
+
+          <MixerDrawer open={mixerOpen} onClose={() => setMixerOpen(false)} />
 
           <aside className="m-3 ml-0 flex w-40 shrink-0 flex-col gap-1 overflow-y-auto rounded-2xl bg-[#2a1f45] p-2 sm:w-48">
             <p className="mb-1 px-1 text-[11px] font-black uppercase tracking-wide text-white/50">Monster Tray</p>

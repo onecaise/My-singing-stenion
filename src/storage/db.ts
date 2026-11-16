@@ -1,5 +1,5 @@
 import { createStore, get, set, del, keys } from 'idb-keyval'
-import type { Monster, Song } from '../types'
+import { defaultProcessing, defaultSongKey, type Monster, type Song } from '../types'
 
 // A single IDB object store keyed with string prefixes. idb-keyval's
 // createStore only creates one object store per call reliably when sharing a
@@ -26,11 +26,23 @@ export async function deleteMonster(id: string): Promise<void> {
   await del(monsterKey(id), store)
 }
 
+/** Fills in "Make It Sound Good" fields for monsters saved before this
+ * feature existed, so older songs keep loading without a migration step. */
+function withMonsterDefaults(monster: Monster): Monster {
+  if (monster.processing) return monster
+  return { ...monster, processing: defaultProcessing() }
+}
+
+function withSongDefaults(song: Song): Song {
+  if (song.key) return song
+  return { ...song, key: defaultSongKey() }
+}
+
 export async function loadAllMonsters(): Promise<Monster[]> {
   const allKeys = await keys(store)
   const monsterKeys = allKeys.filter((k) => typeof k === 'string' && k.startsWith(MONSTER_PREFIX))
   const monsters = await Promise.all(monsterKeys.map((k) => get<Monster>(k, store)))
-  return (monsters.filter(Boolean) as Monster[]).sort((a, b) => a.createdAt - b.createdAt)
+  return (monsters.filter(Boolean) as Monster[]).map(withMonsterDefaults).sort((a, b) => a.createdAt - b.createdAt)
 }
 
 export async function saveSong(song: Song): Promise<void> {
@@ -45,7 +57,7 @@ export async function loadAllSongs(): Promise<Song[]> {
   const allKeys = await keys(store)
   const songKeys = allKeys.filter((k) => typeof k === 'string' && k.startsWith(SONG_PREFIX))
   const songs = await Promise.all(songKeys.map((k) => get<Song>(k, store)))
-  return (songs.filter(Boolean) as Song[]).sort((a, b) => b.updatedAt - a.updatedAt)
+  return (songs.filter(Boolean) as Song[]).map(withSongDefaults).sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 /** Stores a raw Blob (audio or image) under a fresh key and returns that key. */

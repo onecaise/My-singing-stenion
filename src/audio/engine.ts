@@ -9,11 +9,15 @@ export interface VoiceInput {
   volume: number
   muted: boolean
   soloed: boolean
+  /** linear gain applied so every monster matches the target loudness;
+   * callers pass 1 when loudness matching is toggled off for this monster */
+  loudnessGainLinear: number
 }
 
 interface Voice {
   source: AudioBufferSourceNode
   gain: GainNode
+  loudnessGain: GainNode
   volume: number
   muted: boolean
   soloed: boolean
@@ -192,9 +196,11 @@ export class StewnionAudioEngine {
     source.playbackRate.value = input.playbackRate
     const gain = ctx.createGain()
     gain.gain.value = 0
-    source.connect(gain).connect(this.voiceBus)
+    const loudnessGain = ctx.createGain()
+    loudnessGain.gain.value = input.loudnessGainLinear
+    source.connect(gain).connect(loudnessGain).connect(this.voiceBus)
     source.start(startAt)
-    this.voices.set(id, { source, gain, volume: input.volume, muted: input.muted, soloed: input.soloed })
+    this.voices.set(id, { source, gain, loudnessGain, volume: input.volume, muted: input.muted, soloed: input.soloed })
     this.applyGains()
     this.updateDuckGain()
     return { startAt, delayMs: Math.max(0, (startAt - ctx.currentTime) * 1000) }
@@ -240,6 +246,14 @@ export class StewnionAudioEngine {
     if (!voice) return
     voice.muted = muted
     this.applyGains()
+  }
+
+  /** Live-toggles loudness matching for one voice without rebuilding it,
+   * so the user can A/B the "before" and "after" instantly. */
+  setLoudnessGain(id: string, linearGain: number): void {
+    const voice = this.voices.get(id)
+    if (!voice) return
+    voice.loudnessGain.gain.setTargetAtTime(linearGain, this.ctx.currentTime, 0.02)
   }
 
   setSoloed(id: string, soloed: boolean): void {

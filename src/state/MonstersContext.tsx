@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { engine } from '../audio/engine'
+import { analyzeMonsterAudio } from '../audio/analysis'
 import { decodeBlobToBuffer, fitBufferToDuration, rotateBuffer } from '../audio/buffers'
 import { deleteBlob, deleteMonster as deleteMonsterRecord, loadAllMonsters, loadBlob, saveBlob, saveMonster } from '../storage/db'
-import { makeId, type Monster } from '../types'
+import { defaultProcessing, makeId, type Monster, type MonsterProcessing } from '../types'
 
 export interface NewMonsterInput {
   name: string
@@ -18,6 +19,7 @@ export interface NewMonsterInput {
 export type MonsterPatch = Partial<Pick<Monster, 'name' | 'color' | 'emoji' | 'volume' | 'offsetSec'>> & {
   imageBlob?: Blob | null
   audioBlob?: Blob
+  processing?: Partial<MonsterProcessing>
 }
 
 interface MonstersContextValue {
@@ -61,6 +63,7 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
   const createMonster = useCallback(async (input: NewMonsterInput): Promise<Monster> => {
     const audioBlobKey = await saveBlob(input.audioBlob, 'audio-')
     const imageBlobKey = input.imageBlob ? await saveBlob(input.imageBlob, 'image-') : null
+    const analysis = await analyzeMonsterAudio(engine.ctx, input.audioBlob)
     const now = Date.now()
     const monster: Monster = {
       id: makeId(),
@@ -73,6 +76,7 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
       offsetSec: input.offsetSec,
       recordedBpm: engine.bpm,
       recordedLoopBars: engine.loopBars,
+      processing: { ...defaultProcessing(), loudnessGainDb: analysis.loudnessGainDb },
       createdAt: now,
       updatedAt: now,
     }
@@ -88,12 +92,18 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
       let audioBlobKey = existing.audioBlobKey
       let recordedBpm = existing.recordedBpm
       let recordedLoopBars = existing.recordedLoopBars
+      let processing = existing.processing
       if (patch.audioBlob) {
         await deleteBlob(existing.audioBlobKey)
         audioBlobKey = await saveBlob(patch.audioBlob, 'audio-')
         bufferCache.current.delete(existing.audioBlobKey)
         recordedBpm = engine.bpm
         recordedLoopBars = engine.loopBars
+        const analysis = await analyzeMonsterAudio(engine.ctx, patch.audioBlob)
+        processing = { ...defaultProcessing(), loudnessGainDb: analysis.loudnessGainDb }
+      }
+      if (patch.processing) {
+        processing = { ...processing, ...patch.processing }
       }
       let imageBlobKey = existing.imageBlobKey
       if (patch.imageBlob !== undefined) {
@@ -111,6 +121,7 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
         imageBlobKey,
         recordedBpm,
         recordedLoopBars,
+        processing,
         updatedAt: Date.now(),
       }
       await saveMonster(updated)
