@@ -107,8 +107,10 @@ export class StewnionAudioEngine {
     return this.transportStartTime + Math.max(k, 0) * bar
   }
 
-  /** Adds (or replaces) a monster's loop, scheduled to join on the next bar. */
-  addVoice(id: string, input: VoiceInput): void {
+  /** Adds (or replaces) a monster's loop, scheduled to join on the next bar.
+   * Returns the AudioContext time (and `delayMs` from now) it will start,
+   * so the UI can time a matching CSS animation start. */
+  addVoice(id: string, input: VoiceInput): { startAt: number; delayMs: number } {
     this.removeVoice(id)
     const ctx = this.ctx
     const startAt = this.nextBarBoundary()
@@ -124,6 +126,7 @@ export class StewnionAudioEngine {
     source.start(startAt)
     this.voices.set(id, { source, gain, volume: input.volume, muted: input.muted, soloed: input.soloed })
     this.applyGains()
+    return { startAt, delayMs: Math.max(0, (startAt - ctx.currentTime) * 1000) }
   }
 
   removeVoice(id: string): void {
