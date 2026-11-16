@@ -1,5 +1,6 @@
 import { barDurationSec, loopDurationSec, renderRoomImpulseResponse } from './buffers'
-import { BEATS_PER_BAR } from '../types'
+import { buildRoleFilterChain } from './roles'
+import { BEATS_PER_BAR, type MonsterRole } from '../types'
 
 export interface VoiceInput {
   buffer: AudioBuffer
@@ -12,12 +13,20 @@ export interface VoiceInput {
   /** linear gain applied so every monster matches the target loudness;
    * callers pass 1 when loudness matching is toggled off for this monster */
   loudnessGainLinear: number
+  /** -1 (left) .. 1 (right) */
+  pan: number
+  role: MonsterRole
+  /** false bypasses the role's EQ chain entirely, for A/B comparison */
+  roleEqEnabled: boolean
+  /** 0..1 how much of this voice feeds the shared reverb, on top of role EQ */
+  reverbSendAmount: number
 }
 
 interface Voice {
   source: AudioBufferSourceNode
   gain: GainNode
   loudnessGain: GainNode
+  pan: StereoPannerNode
   volume: number
   muted: boolean
   soloed: boolean
@@ -198,9 +207,29 @@ export class StewnionAudioEngine {
     gain.gain.value = 0
     const loudnessGain = ctx.createGain()
     loudnessGain.gain.value = input.loudnessGainLinear
-    source.connect(gain).connect(loudnessGain).connect(this.voiceBus)
+    source.connect(gain).connect(loudnessGain)
+
+    let chainEnd: AudioNode = loudnessGain
+    if (input.roleEqEnabled) {
+      for (const filter of buildRoleFilterChain(ctx, input.role)) {
+        chainEnd.connect(filter)
+        chainEnd = filter
+      }
+    }
+
+    const pan = ctx.createStereoPanner()
+    pan.pan.value = input.pan
+    chainEnd.connect(pan)
+    pan.connect(this.voiceBus)
+
+    if (input.reverbSendAmount > 0) {
+      const send = ctx.createGain()
+      send.gain.value = input.reverbSendAmount
+      pan.connect(send).connect(this.reverbSendTarget)
+    }
+
     source.start(startAt)
-    this.voices.set(id, { source, gain, loudnessGain, volume: input.volume, muted: input.muted, soloed: input.soloed })
+    this.voices.set(id, { source, gain, loudnessGain, pan, volume: input.volume, muted: input.muted, soloed: input.soloed })
     this.applyGains()
     this.updateDuckGain()
     return { startAt, delayMs: Math.max(0, (startAt - ctx.currentTime) * 1000) }
@@ -254,6 +283,13 @@ export class StewnionAudioEngine {
     const voice = this.voices.get(id)
     if (!voice) return
     voice.loudnessGain.gain.setTargetAtTime(linearGain, this.ctx.currentTime, 0.02)
+  }
+
+  /** Live pan update, no voice rebuild needed. */
+  setPan(id: string, pan: number): void {
+    const voice = this.voices.get(id)
+    if (!voice) return
+    voice.pan.pan.setTargetAtTime(pan, this.ctx.currentTime, 0.02)
   }
 
   setSoloed(id: string, soloed: boolean): void {

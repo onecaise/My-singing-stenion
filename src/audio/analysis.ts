@@ -111,17 +111,65 @@ export function detectOnsets(buffer: AudioBuffer, minSpacingSec = 0.12): number[
   return onsets
 }
 
+// Log-spaced bins from "sub-bass" to "air" used to approximate a spectral
+// centroid via the Goertzel algorithm, which is much cheaper than a full
+// FFT when we only need a few dozen bins rather than a full spectrum.
+const CENTROID_BINS_HZ = [80, 120, 180, 270, 400, 600, 900, 1300, 1900, 2800, 4200, 6300, 9500]
+
+function goertzelMagnitude(frame: Float32Array, frameLength: number, sampleRate: number, freq: number): number {
+  const k = Math.round((frameLength * freq) / sampleRate)
+  const omega = (2 * Math.PI * k) / frameLength
+  const coeff = 2 * Math.cos(omega)
+  let s1 = 0
+  let s2 = 0
+  for (let i = 0; i < frameLength; i++) {
+    const s0 = frame[i] + coeff * s1 - s2
+    s2 = s1
+    s1 = s0
+  }
+  const power = s1 * s1 + s2 * s2 - coeff * s1 * s2
+  return Math.sqrt(Math.max(0, power))
+}
+
+/** Rough "how bright does this sound" measure: the energy-weighted average
+ * frequency across a handful of windows, in Hz. Higher = brighter/buzzier. */
+export function estimateSpectralCentroidHz(buffer: AudioBuffer): number {
+  const mono = toMono(buffer)
+  const sampleRate = buffer.sampleRate
+  const frameLength = Math.min(mono.length, 2048)
+  if (frameLength < 64) return 1000
+  const hop = frameLength
+  const numFrames = Math.max(1, Math.floor(mono.length / hop))
+  let weightedSum = 0
+  let totalMag = 0
+  for (let f = 0; f < numFrames; f++) {
+    const frame = mono.subarray(f * hop, f * hop + frameLength)
+    for (const freq of CENTROID_BINS_HZ) {
+      const mag = goertzelMagnitude(frame, frameLength, sampleRate, freq)
+      weightedSum += freq * mag
+      totalMag += mag
+    }
+  }
+  if (totalMag === 0) return 1000
+  return weightedSum / totalMag
+}
+
 export interface AudioAnalysis {
   loudnessGainDb: number
   onsetSec: number
+  spectralCentroidHz: number
+  onsetDensityPerSec: number
 }
 
 /** Runs the full "Make It Sound Good" analysis pipeline on a monster's raw
  * audio blob once, so every auto-mix feature can share a single decode. */
 export async function analyzeMonsterAudio(ctx: BaseAudioContext, blob: Blob): Promise<AudioAnalysis> {
   const buffer = await decodeBlobToBuffer(ctx, blob)
+  const durationSec = Math.max(0.1, buffer.duration)
   return {
     loudnessGainDb: computeLoudnessGainDb(buffer),
     onsetSec: detectOnsetSec(buffer),
+    spectralCentroidHz: estimateSpectralCentroidHz(buffer),
+    onsetDensityPerSec: detectOnsets(buffer).length / durationSec,
   }
 }

@@ -1,10 +1,12 @@
+import { ALL_ROLES, ROLE_LABELS, defaultPanForRole } from '../audio/roles'
 import { useMonsters } from '../state/MonstersContext'
 import { useStage } from '../state/StageContext'
+import type { MonsterRole } from '../types'
 import { MonsterFace } from './MonsterFace'
 
 export function MixerDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { monsters } = useMonsters()
-  const { song, toggleMute, toggleSolo, setMonsterLiveVolume, setMonsterLoudnessEnabled, setMonsterProcessingAndRebuild } = useStage()
+  const { song, toggleMute, toggleSolo, setMonsterLiveVolume, setMonsterPan, setMonsterLoudnessEnabled, setMonsterProcessingAndRebuild } = useStage()
 
   if (!open) return null
 
@@ -60,7 +62,46 @@ export function MixerDrawer({ open, onClose }: { open: boolean; onClose: () => v
               />
             </label>
 
+            <label className="mb-1.5 flex items-center gap-2 text-[10px] font-bold text-white/60">
+              Pan
+              <input
+                type="range"
+                min={-1}
+                max={1}
+                step={0.01}
+                value={monster.processing.pan}
+                onChange={(e) => setMonsterPan(placed.monsterId, Number(e.target.value))}
+                className="w-full"
+              />
+            </label>
+
+            <label className="mb-1.5 flex items-center gap-2 text-[10px] font-bold text-white/60">
+              Role
+              <select
+                value={monster.processing.role}
+                onChange={(e) => {
+                  const role = e.target.value as MonsterRole
+                  void setMonsterProcessingAndRebuild(placed.monsterId, { role, roleAuto: false, pan: defaultPanForRole(role, monster.id) })
+                }}
+                className="flex-1 rounded-lg bg-white/10 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-amber-300"
+              >
+                {ALL_ROLES.map((r) => (
+                  <option key={r} value={r} className="text-black">
+                    {ROLE_LABELS[r]}
+                  </option>
+                ))}
+              </select>
+            </label>
+
             <div className="flex flex-col gap-1">
+              <label className="flex items-center gap-1.5 text-[10px] font-bold text-white/60">
+                <input
+                  type="checkbox"
+                  checked={monster.processing.roleEqEnabled}
+                  onChange={(e) => void setMonsterProcessingAndRebuild(placed.monsterId, { roleEqEnabled: e.target.checked })}
+                />
+                Role EQ
+              </label>
               <label className="flex items-center gap-1.5 text-[10px] font-bold text-white/60">
                 <input
                   type="checkbox"

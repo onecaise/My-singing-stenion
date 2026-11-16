@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from 'react'
 import { dbToLinear } from '../audio/analysis'
 import { engine } from '../audio/engine'
+import { ROLE_REVERB_SEND } from '../audio/roles'
 import { prepareVoiceBuffer } from '../audio/voicePrep'
 import { deleteSong as deleteSongRecord, loadAllSongs, saveBlob, saveSong } from '../storage/db'
 import { BUILT_IN_BACKDROPS, defaultSongKey, makeId, type Backdrop, type Monster, type MonsterProcessing, type PlacedMonster, type Song, type SongKey } from '../types'
@@ -24,6 +25,7 @@ interface StageContextValue {
   toggleMute: (monsterId: string) => void
   toggleSolo: (monsterId: string) => void
   setMonsterLiveVolume: (monsterId: string, volume: number) => void
+  setMonsterPan: (monsterId: string, pan: number) => void
   setMonsterLoudnessEnabled: (monsterId: string, enabled: boolean) => void
   setMonsterProcessingAndRebuild: (monsterId: string, patch: Partial<MonsterProcessing>) => Promise<void>
   setBpm: (bpm: number) => Promise<void>
@@ -112,6 +114,10 @@ export function StageProvider({ children }: { children: ReactNode }) {
         muted: placed.muted,
         soloed: placed.soloed,
         loudnessGainLinear,
+        pan: monster.processing.pan,
+        role: monster.processing.role,
+        roleEqEnabled: monster.processing.roleEqEnabled,
+        reverbSendAmount: ROLE_REVERB_SEND[monster.processing.role],
       })
       markStarted(placed.monsterId, delayMs)
     },
@@ -182,6 +188,14 @@ export function StageProvider({ children }: { children: ReactNode }) {
     (monsterId: string, volume: number) => {
       engine.setVolume(monsterId, volume)
       void updateMonster(monsterId, { volume })
+    },
+    [updateMonster],
+  )
+
+  const setMonsterPan = useCallback(
+    (monsterId: string, pan: number) => {
+      engine.setPan(monsterId, pan)
+      void updateMonster(monsterId, { processing: { pan } })
     },
     [updateMonster],
   )
@@ -337,6 +351,7 @@ export function StageProvider({ children }: { children: ReactNode }) {
       toggleMute,
       toggleSolo,
       setMonsterLiveVolume,
+      setMonsterPan,
       setMonsterLoudnessEnabled,
       setMonsterProcessingAndRebuild,
       setBpm,
@@ -365,6 +380,7 @@ export function StageProvider({ children }: { children: ReactNode }) {
       toggleMute,
       toggleSolo,
       setMonsterLiveVolume,
+      setMonsterPan,
       setMonsterLoudnessEnabled,
       setMonsterProcessingAndRebuild,
       setBpm,

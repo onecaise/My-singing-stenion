@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { engine } from '../audio/engine'
 import { analyzeMonsterAudio } from '../audio/analysis'
 import { decodeBlobToBuffer, fitBufferToDuration, rotateBuffer } from '../audio/buffers'
+import { defaultPanForRole, suggestRole } from '../audio/roles'
 import { deleteBlob, deleteMonster as deleteMonsterRecord, loadAllMonsters, loadBlob, saveBlob, saveMonster } from '../storage/db'
 import { defaultProcessing, makeId, type Monster, type MonsterProcessing } from '../types'
 
@@ -63,10 +64,12 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
   const createMonster = useCallback(async (input: NewMonsterInput): Promise<Monster> => {
     const audioBlobKey = await saveBlob(input.audioBlob, 'audio-')
     const imageBlobKey = input.imageBlob ? await saveBlob(input.imageBlob, 'image-') : null
+    const id = makeId()
     const analysis = await analyzeMonsterAudio(engine.ctx, input.audioBlob)
+    const role = suggestRole(analysis.spectralCentroidHz, analysis.onsetDensityPerSec)
     const now = Date.now()
     const monster: Monster = {
-      id: makeId(),
+      id,
       name: input.name,
       color: input.color,
       emoji: input.emoji,
@@ -76,7 +79,14 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
       offsetSec: input.offsetSec,
       recordedBpm: engine.bpm,
       recordedLoopBars: engine.loopBars,
-      processing: { ...defaultProcessing(), loudnessGainDb: analysis.loudnessGainDb, detectedOnsetSec: analysis.onsetSec },
+      processing: {
+        ...defaultProcessing(),
+        loudnessGainDb: analysis.loudnessGainDb,
+        detectedOnsetSec: analysis.onsetSec,
+        role,
+        roleAuto: true,
+        pan: defaultPanForRole(role, id),
+      },
       createdAt: now,
       updatedAt: now,
     }
@@ -101,6 +111,13 @@ export function MonstersProvider({ children }: { children: ReactNode }) {
         recordedLoopBars = engine.loopBars
         const analysis = await analyzeMonsterAudio(engine.ctx, patch.audioBlob)
         processing = { ...defaultProcessing(), loudnessGainDb: analysis.loudnessGainDb, detectedOnsetSec: analysis.onsetSec }
+        // only re-suggest the role/pan if the user hasn't manually chosen one already
+        if (existing.processing.roleAuto) {
+          const role = suggestRole(analysis.spectralCentroidHz, analysis.onsetDensityPerSec)
+          processing = { ...processing, role, roleAuto: true, pan: defaultPanForRole(role, id) }
+        } else {
+          processing = { ...processing, role: existing.processing.role, roleAuto: false, pan: existing.processing.pan }
+        }
       }
       if (patch.processing) {
         processing = { ...processing, ...patch.processing }
